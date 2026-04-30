@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Viewer konštrukcie</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d0d18; color: #ccc; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    #header { padding: 12px 20px; background: #13131f; border-bottom: 1px solid #2a2a40; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    #header h1 { font-size: 15px; font-weight: 500; color: #eee; }
+    #controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    label { font-size: 12px; color: #888; }
+    button.sit-btn { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #333; background: transparent; color: #aaa; cursor: pointer; }
+    button.sit-btn.active { background: #1e3a5f; color: #7ab4ff; border-color: #2a5a9f; }
+    button.sit-btn:hover:not(.active) { background: #1a1a2e; }
+    input[type=range] { width: 110px; accent-color: #5599ee; }
+    #scale-out { font-size: 13px; color: #eee; min-width: 36px; }
+    .legend { display: flex; gap: 12px; margin-left: auto; }
+    .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+    .leg-line { width: 24px; height: 2px; border-radius: 1px; }
+    .leg-orig { background: #4488cc; opacity: 0.6; }
+    .leg-def  { background: #ff9944; }
+    #canvas-wrap { flex: 1; position: relative; }
+    canvas { width: 100% !important; height: 100% !important; display: block; }
+    #hint { position: absolute; bottom: 12px; right: 16px; font-size: 11px; color: #444; }
+  </style>
+</head>
+<body>
+<div id="header">
+  <h1>Viewer konštrukcie</h1>
+  <div id="controls">
+    <div class="ctrl-group">
+      <label>Zaťažovacia situácia:</label>
+      <div id="sit-buttons"></div>
+    </div>
+    <div class="ctrl-group">
+      <label>Mierka deformácie:</label>
+      <input type="range" id="scale-sl" min="0" max="500" value="100" step="1">
+      <span id="scale-out">1.0×</span>
+    </div>
+  </div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-line leg-orig"></div>pôvodný tvar</div>
+    <div class="leg-item"><div class="leg-line leg-def"></div>deformovaný tvar</div>
+  </div>
+</div>
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div id="hint">ťahaj: rotácia &nbsp;|&nbsp; scroll: zoom</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+fetch('data.json')
+  .then(r => r.json())
+  .then(data => init(data))
+  .catch(() => {
+    document.body.innerHTML = '<p style="padding:2rem;color:#f55">Chyba: súbor data.json sa nenašiel vedľa index.html.</p>';
+  });
+
+function init(data) {
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x0d0d18, 1);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+
+  let cx = 0, cy = 0, cz = 0;
+  data.nodes.forEach(n => { cx += n.x; cy += n.y; cz += n.z; });
+  cx /= data.nodes.length; cy /= data.nodes.length; cz /= data.nodes.length;
+
+  let sph = { theta: 0.15, phi: 1.35, r: 70 };
+  function updateCamera() {
+    camera.position.set(
+      cx + sph.r * Math.sin(sph.phi) * Math.sin(sph.theta),
+      cy + sph.r * Math.cos(sph.phi),
+      cz + sph.r * Math.sin(sph.phi) * Math.cos(sph.theta)
+    );
+    camera.lookAt(cx, cy, cz);
+    camera.up.set(0, 1, 0);
+  }
+  updateCamera();
+
+  let isDragging = false, px = 0, py = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; px = e.clientX; py = e.clientY; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  window.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    sph.theta -= (e.clientX - px) * 0.006;
+    sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi - (e.clientY - py) * 0.006));
+    px = e.clientX; py = e.clientY;
+    updateCamera();
+  });
+  canvas.addEventListener('wheel', e => {
+    sph.r = Math.max(2, Math.min(500, sph.r + e.deltaY * 0.05));
+    updateCamera();
+  }, { passive: true });
+
+  let currentCase = 0, scaleFactor = 1.0;
+  const origGroup = new THREE.Group();
+  const defGroup  = new THREE.Group();
+  scene.add(origGroup, defGroup);
+
+  function origPos(id) {
+    const n = data.nodes.find(x => x.id === id);
+    return new THREE.Vector3(n.x, n.y, n.z);
+  }
+  function defPos(id, caseIdx, scale) {
+    const n = data.nodes.find(x => x.id === id);
+    const d = data.cases[caseIdx].displacements.find(x => x.id === id);
+    return new THREE.Vector3(n.x + d.dx * scale, n.y + d.dy * scale, n.z + d.dz * scale);
+  }
+
+  function buildScene() {
+    origGroup.clear(); defGroup.clear();
+    const mOrig = new THREE.LineBasicMaterial({ color: 0x4488cc, transparent: true, opacity: 0.4 });
+    const mDef  = new THREE.LineBasicMaterial({ color: 0xff9944 });
+    const mOrigN = new THREE.MeshBasicMaterial({ color: 0x5599ee });
+    const mDefN  = new THREE.MeshBasicMaterial({ color: 0xff7722 });
+    const sGeo = new THREE.SphereGeometry(0.15, 10, 7);
+
+    data.members.forEach(m => {
+      origGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([origPos(m.from), origPos(m.to)]), mOrig));
+      defGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([defPos(m.from, currentCase, scaleFactor), defPos(m.to, currentCase, scaleFactor)]), mDef));
+    });
+    data.nodes.forEach(n => {
+      const mo = new THREE.Mesh(sGeo, mOrigN); mo.position.copy(origPos(n.id)); origGroup.add(mo);
+      const md = new THREE.Mesh(sGeo, mDefN);  md.position.copy(defPos(n.id, currentCase, scaleFactor)); defGroup.add(md);
+    });
+
+    scene.children = scene.children.filter(o => !(o instanceof THREE.GridHelper));
+    const grid = new THREE.GridHelper(500, 50, 0x1e1e33, 0x181828);
+    grid.position.set(cx, 0, cz);
+    scene.add(grid);
+  }
+
+  const btnWrap = document.getElementById('sit-buttons');
+  data.cases.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'sit-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = c.name;
+    btn.onclick = () => {
+      currentCase = i;
+      document.querySelectorAll('.sit-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      buildScene();
+    };
+    btnWrap.appendChild(btn);
+  });
+
+  document.getElementById('scale-sl').addEventListener('input', function () {
+    scaleFactor = this.value / 100;
+    document.getElementById('scale-out').textContent = scaleFactor.toFixed(1) + '×';
+    buildScene();
+  });
+
+  function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  buildScene();
+
+  (function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  })();
+}
+</script>
+</body>
+</html>
