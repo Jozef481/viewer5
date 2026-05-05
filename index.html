@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Viewer konštrukcie</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d0d18; color: #ccc; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    #header { padding: 10px 20px; background: #13131f; border-bottom: 1px solid #2a2a40; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    #header h1 { font-size: 15px; font-weight: 500; color: #eee; margin-right: 4px; }
+    .ctrl-group { display: flex; align-items: center; gap: 7px; }
+    .sep { width: 1px; height: 28px; background: #2a2a40; margin: 0 4px; }
+    label { font-size: 12px; color: #888; white-space: nowrap; }
+    select {
+      font-size: 12px; padding: 4px 8px; border-radius: 6px;
+      border: 1px solid #333; background: #1a1a2e; color: #ccc; cursor: pointer;
+    }
+    input[type=range] { width: 100px; accent-color: #5599ee; }
+    #scale-out { font-size: 13px; color: #eee; min-width: 36px; }
+
+    /* toggle tlačidlo pre podklad */
+    #toggle-bg {
+      font-size: 12px; padding: 4px 11px; border-radius: 6px;
+      border: 1px solid #444; background: transparent; color: #888; cursor: pointer;
+      transition: all .15s;
+    }
+    #toggle-bg.on { background: #1e2e1e; color: #55cc88; border-color: #2a6a3a; }
+
+    .legend { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; align-items: center; }
+    .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+    .leg-line { width: 22px; height: 2px; border-radius: 1px; }
+
+    #canvas-wrap { flex: 1; position: relative; }
+    canvas { width: 100% !important; height: 100% !important; display: block; }
+    #hint { position: absolute; bottom: 12px; right: 16px; font-size: 11px; color: #333; }
+  </style>
+</head>
+<body>
+<div id="header">
+  <h1>Viewer konštrukcie</h1>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <label style="color:#7ab4ff">▪ Situácia A:</label>
+    <select id="sel-a"></select>
+  </div>
+
+  <div class="ctrl-group">
+    <label style="color:#ffaa55">▪ Situácia B:</label>
+    <select id="sel-b"></select>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <button id="toggle-bg">⬜ Podklad: vyp.</button>
+    <select id="sel-bg" style="display:none"></select>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <label>Mierka:</label>
+    <input type="range" id="scale-sl" min="0" max="500" value="100" step="1">
+    <span id="scale-out">1.0×</span>
+  </div>
+
+  <div class="legend">
+    <div class="leg-item"><div class="leg-line" style="background:#4488cc;opacity:.6"></div>A</div>
+    <div class="leg-item"><div class="leg-line" style="background:#ff9944"></div>B</div>
+    <div class="leg-item" id="leg-bg" style="display:none"><div class="leg-line" style="background:#888;opacity:.5"></div>podklad</div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div id="hint">ťahaj: rotácia &nbsp;|&nbsp; scroll: zoom</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+fetch('data.json')
+  .then(r => r.json())
+  .then(data => init(data))
+  .catch(() => {
+    document.body.innerHTML = '<p style="padding:2rem;color:#f55">Chyba: súbor data.json sa nenašiel vedľa index.html.</p>';
+  });
+
+function init(data) {
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x0d0d18, 1);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+
+  let cx = 0, cy = 0, cz = 0;
+  data.nodes.forEach(n => { cx += n.x; cy += n.y; cz += n.z; });
+  cx /= data.nodes.length; cy /= data.nodes.length; cz /= data.nodes.length;
+
+  let sph = { theta: 0.15, phi: 1.35, r: 70 };
+  function updateCamera() {
+    camera.position.set(
+      cx + sph.r * Math.sin(sph.phi) * Math.sin(sph.theta),
+      cy + sph.r * Math.cos(sph.phi),
+      cz + sph.r * Math.sin(sph.phi) * Math.cos(sph.theta)
+    );
+    camera.lookAt(cx, cy, cz);
+    camera.up.set(0, 1, 0);
+  }
+  updateCamera();
+
+  let isDragging = false, px = 0, py = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; px = e.clientX; py = e.clientY; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  window.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    sph.theta -= (e.clientX - px) * 0.006;
+    sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi - (e.clientY - py) * 0.006));
+    px = e.clientX; py = e.clientY;
+    updateCamera();
+  });
+  canvas.addEventListener('wheel', e => {
+    sph.r = Math.max(2, Math.min(500, sph.r + e.deltaY * 0.05));
+    updateCamera();
+  }, { passive: true });
+
+  let scaleFactor = 1.0;
+  let bgVisible = false;
+
+  const grpA  = new THREE.Group();
+  const grpB  = new THREE.Group();
+  const grpBG = new THREE.Group();
+  scene.add(grpBG, grpA, grpB); // BG vzadu
+
+  function defPos(id, caseIdx, scale) {
+    const n = data.nodes.find(x => x.id === id);
+    const d = data.cases[caseIdx].displacements.find(x => x.id === id);
+    return new THREE.Vector3(n.x + d.dx * scale, n.y + d.dy * scale, n.z + d.dz * scale);
+  }
+
+  function buildGroup(grp, caseIdx, color, opacity) {
+    grp.clear();
+    const mat  = new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+    const matN = new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity });
+    const sGeo = new THREE.SphereGeometry(0.15, 10, 7);
+    data.members.forEach(m => {
+      grp.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([defPos(m.from, caseIdx, scaleFactor), defPos(m.to, caseIdx, scaleFactor)]),
+        mat
+      ));
+    });
+    data.nodes.forEach(n => {
+      const mesh = new THREE.Mesh(sGeo, matN);
+      mesh.position.copy(defPos(n.id, caseIdx, scaleFactor));
+      grp.add(mesh);
+    });
+  }
+
+  function buildScene() {
+    const idxA  = parseInt(document.getElementById('sel-a').value);
+    const idxB  = parseInt(document.getElementById('sel-b').value);
+    const idxBG = parseInt(document.getElementById('sel-bg').value);
+
+    buildGroup(grpA, idxA, 0x4488cc, 0.75);
+    buildGroup(grpB, idxB, 0xff9944, 1.0);
+
+    grpBG.visible = bgVisible;
+    if (bgVisible) buildGroup(grpBG, idxBG, 0x888888, 0.35);
+
+    scene.children = scene.children.filter(o => !(o instanceof THREE.GridHelper));
+    const grid = new THREE.GridHelper(500, 50, 0x1e1e33, 0x181828);
+    grid.position.set(cx, 0, cz);
+    scene.add(grid);
+  }
+
+  // naplň všetky tri selecty
+  const selA  = document.getElementById('sel-a');
+  const selB  = document.getElementById('sel-b');
+  const selBG = document.getElementById('sel-bg');
+  data.cases.forEach((c, i) => {
+    [selA, selB, selBG].forEach(sel => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = c.name;
+      sel.appendChild(o);
+    });
+  });
+  selA.value  = 0;
+  selB.value  = Math.min(1, data.cases.length - 1);
+  selBG.value = 0;
+
+  // toggle podkladu
+  const toggleBtn = document.getElementById('toggle-bg');
+  const legBg     = document.getElementById('leg-bg');
+  toggleBtn.addEventListener('click', () => {
+    bgVisible = !bgVisible;
+    toggleBtn.classList.toggle('on', bgVisible);
+    toggleBtn.textContent = bgVisible ? '⬜ Podklad: zap.' : '⬜ Podklad: vyp.';
+    selBG.style.display = bgVisible ? '' : 'none';
+    legBg.style.display = bgVisible ? '' : 'none';
+    buildScene();
+  });
+
+  selA.addEventListener('change', buildScene);
+  selB.addEventListener('change', buildScene);
+  selBG.addEventListener('change', buildScene);
+
+  document.getElementById('scale-sl').addEventListener('input', function () {
+    scaleFactor = this.value / 100;
+    document.getElementById('scale-out').textContent = scaleFactor.toFixed(1) + '×';
+    buildScene();
+  });
+
+  function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  buildScene();
+
+  (function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  })();
+}
+</script>
+</body>
+</html>
