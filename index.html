@@ -5,35 +5,68 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Viewer konštrukcie</title>
   <style>
+    :root {
+      --bg:        #0d0d18;
+      --header-bg: #13131f;
+      --border:    #2a2a40;
+      --text:      #ccc;
+      --text-h:    #eee;
+      --label:     #888;
+      --sel-bg:    #1a1a2e;
+      --sel-border:#333;
+      --hint:      #333;
+      --clear:     0x0d0d18;
+    }
+    body.light {
+      --bg:        #f0f2f5;
+      --header-bg: #ffffff;
+      --border:    #d0d4de;
+      --text:      #444;
+      --text-h:    #111;
+      --label:     #666;
+      --sel-bg:    #ffffff;
+      --sel-border:#bbb;
+      --hint:      #aaa;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0d0d18; color: #ccc; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
-    #header { padding: 10px 20px; background: #13131f; border-bottom: 1px solid #2a2a40; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-    #header h1 { font-size: 15px; font-weight: 500; color: #eee; margin-right: 4px; }
+    body { background: var(--bg); color: var(--text); font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; transition: background .2s; }
+    #header { padding: 10px 20px; background: var(--header-bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; transition: background .2s, border-color .2s; }
+    #header h1 { font-size: 15px; font-weight: 500; color: var(--text-h); margin-right: 4px; }
     .ctrl-group { display: flex; align-items: center; gap: 7px; }
-    .sep { width: 1px; height: 28px; background: #2a2a40; margin: 0 4px; }
-    label { font-size: 12px; color: #888; white-space: nowrap; }
+    .sep { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+    label { font-size: 12px; color: var(--label); white-space: nowrap; }
     select {
       font-size: 12px; padding: 4px 8px; border-radius: 6px;
-      border: 1px solid #333; background: #1a1a2e; color: #ccc; cursor: pointer;
+      border: 1px solid var(--sel-border); background: var(--sel-bg); color: var(--text); cursor: pointer;
     }
     input[type=range] { width: 100px; accent-color: #5599ee; }
-    #scale-out { font-size: 13px; color: #eee; min-width: 36px; }
+    #scale-out { font-size: 13px; color: var(--text-h); min-width: 36px; }
 
     /* toggle tlačidlo pre podklad */
     #toggle-bg {
       font-size: 12px; padding: 4px 11px; border-radius: 6px;
-      border: 1px solid #444; background: transparent; color: #888; cursor: pointer;
+      border: 1px solid var(--sel-border); background: transparent; color: var(--label); cursor: pointer;
       transition: all .15s;
     }
     #toggle-bg.on { background: #1e2e1e; color: #55cc88; border-color: #2a6a3a; }
+    body.light #toggle-bg.on { background: #e2f5ea; color: #2a8a4a; border-color: #5acc88; }
+
+    /* theme toggle button */
+    #toggle-theme {
+      font-size: 12px; padding: 4px 11px; border-radius: 6px;
+      border: 1px solid var(--sel-border); background: transparent; color: var(--label); cursor: pointer;
+      transition: all .15s;
+    }
+    #toggle-theme:hover { border-color: #5599ee; color: #5599ee; }
 
     .legend { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; align-items: center; }
-    .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+    .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--label); }
     .leg-line { width: 22px; height: 2px; border-radius: 1px; }
 
     #canvas-wrap { flex: 1; position: relative; }
     canvas { width: 100% !important; height: 100% !important; display: block; }
-    #hint { position: absolute; bottom: 12px; right: 16px; font-size: 11px; color: #333; }
+    #hint { position: absolute; bottom: 12px; right: 16px; font-size: 11px; color: var(--hint); }
   </style>
 </head>
 <body>
@@ -50,6 +83,12 @@
   <div class="ctrl-group">
     <label style="color:#ffaa55">▪ Situácia B:</label>
     <select id="sel-b"></select>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <button id="toggle-theme">☀️ Svetlé</button>
   </div>
 
   <div class="sep"></div>
@@ -172,7 +211,9 @@ function init(data) {
     if (bgVisible) buildGroup(grpBG, idxBG, 0x888888, 0.35);
 
     scene.children = scene.children.filter(o => !(o instanceof THREE.GridHelper));
-    const grid = new THREE.GridHelper(500, 50, 0x1e1e33, 0x181828);
+    const grid = isLight
+      ? new THREE.GridHelper(500, 50, 0xbbbbcc, 0xd8d8e8)
+      : new THREE.GridHelper(500, 50, 0x1e1e33, 0x181828);
     grid.position.set(cx, 0, cz);
     scene.add(grid);
   }
@@ -191,6 +232,18 @@ function init(data) {
   selA.value  = 0;
   selB.value  = Math.min(1, data.cases.length - 1);
   selBG.value = 0;
+
+  // theme toggle
+  let isLight = false;
+  const themeBtn = document.getElementById('toggle-theme');
+  themeBtn.addEventListener('click', () => {
+    isLight = !isLight;
+    document.body.classList.toggle('light', isLight);
+    themeBtn.textContent = isLight ? '🌙 Tmavé' : '☀️ Svetlé';
+    renderer.setClearColor(isLight ? 0xf0f2f5 : 0x0d0d18, 1);
+    // rebuild grid with matching colors
+    buildScene();
+  });
 
   // toggle podkladu
   const toggleBtn = document.getElementById('toggle-bg');
